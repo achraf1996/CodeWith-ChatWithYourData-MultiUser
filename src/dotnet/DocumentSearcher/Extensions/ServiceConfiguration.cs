@@ -13,6 +13,7 @@ using Microsoft.KernelMemory.Pipeline.Queue.DevTools;
 
 namespace DocumentSearcher.Extensions;
 
+
 internal sealed class ServiceConfiguration
 {
     // Content of appsettings.json, used to access dynamic data under "Services"
@@ -50,6 +51,8 @@ internal sealed class ServiceConfiguration
     {
         this._rawAppSettings = rawAppSettings ?? throw new ConfigurationException("The given app settings configuration is NULL");
         this._memoryConfiguration = memoryConfiguration ?? throw new ConfigurationException("The given memory configuration is NULL");
+
+        this.MinimumConfigurationIsAvailable(true);
     }
 
     public IKernelMemoryBuilder PrepareBuilder(IKernelMemoryBuilder builder)
@@ -69,11 +72,14 @@ internal sealed class ServiceConfiguration
             throw new ConfigurationException("The given app settings configuration is NULL");
         }
 
+        // Required by ctors expecting KernelMemoryConfig via DI
         builder.AddSingleton(this._memoryConfiguration);
 
         this.ConfigureSearchClient(builder);
 
-        this.ConfigureRetrievalMemoryDb(builder);
+        this.ConfigureRetrievalEmbeddingGenerator(builder);
+
+        this.ConfigureTextGenerator(builder);
 
         return builder;
     }
@@ -91,32 +97,72 @@ internal sealed class ServiceConfiguration
         builder.WithSearchClientConfig(this._memoryConfiguration.Retrieval.SearchClient);
     }
 
-    private void ConfigureRetrievalMemoryDb(IKernelMemoryBuilder builder)
+    private void ConfigureRetrievalEmbeddingGenerator(IKernelMemoryBuilder builder)
     {
-        // Retrieval Memory DB - IMemoryDb interface
-        switch (this._memoryConfiguration.Retrieval.MemoryDbType)
+        switch (this._memoryConfiguration.Retrieval.EmbeddingGeneratorType)
         {
-            case string x when x.Equals("AzureAISearch", StringComparison.OrdinalIgnoreCase):
-                builder.Services.AddAzureAISearchAsMemoryDb(this.GetServiceConfig<AzureAISearchConfig>("AzureAISearch"));
+            case string x when x.Equals("AzureOpenAI", StringComparison.OrdinalIgnoreCase):
+            case string y when y.Equals("AzureOpenAIEmbedding", StringComparison.OrdinalIgnoreCase):
+                builder.Services.AddAzureOpenAIEmbeddingGeneration(this.GetServiceConfig<AzureOpenAIConfig>("AzureOpenAIEmbedding"));
                 break;
-
             default:
-                // NOOP - allow custom implementations, via WithCustomMemoryDb()
                 break;
         }
     }
 
+    private void ConfigureTextGenerator(IKernelMemoryBuilder builder)
+    {
+        // Text generation
+        switch (this._memoryConfiguration.TextGeneratorType)
+        {
+            case string x when x.Equals("AzureOpenAI", StringComparison.OrdinalIgnoreCase):
+            case string y when y.Equals("AzureOpenAIText", StringComparison.OrdinalIgnoreCase):
+                builder.Services.AddAzureOpenAITextGeneration(this.GetServiceConfig<AzureOpenAIConfig>("AzureOpenAIText"));
+                break;
+            default:
+                // NOOP - allow custom implementations, via WithCustomTextGeneration()
+                break;
+        }
+    }
 
     /// <summary>
-    /// Get an instance of T, using dependencies available in the builder,
-    /// except for existing service descriptors for T. Replace/Use the
-    /// given action to define T's implementation.
-    /// Return an instance of T built using the definition provided by
-    /// the action.
+    /// Check the configuration for minimum requirements
     /// </summary>
-    /// <param name="builder">KM builder</param>
-    /// <param name="addCustomService">Action used to configure the service collection</param>
-    /// <typeparam name="T">Target type/interface</typeparam>
+    /// <param name="throwOnError">Whether to throw or return false when the config is incomplete</param>
+    /// <returns>Whether the configuration is valid</returns>
+    private bool MinimumConfigurationIsAvailable(bool throwOnError)
+    {
+        // Check if text generation settings
+        if (string.IsNullOrEmpty(this._memoryConfiguration.TextGeneratorType))
+        {
+            if (!throwOnError) { return false; }
+
+            throw new ConfigurationException("Text generation (TextGeneratorType) is not configured in Kernel Memory.");
+        }
+
+        // Check embedding generation ingestion settings
+        if (this._memoryConfiguration.DataIngestion.EmbeddingGenerationEnabled)
+        {
+            if (this._memoryConfiguration.DataIngestion.EmbeddingGeneratorTypes.Count == 0)
+            {
+                if (!throwOnError) { return false; }
+
+                throw new ConfigurationException("Data ingestion embedding generation (DataIngestion.EmbeddingGeneratorTypes) is not configured in Kernel Memory.");
+            }
+        }
+
+        // Check embedding generation retrieval settings
+        if (string.IsNullOrEmpty(this._memoryConfiguration.Retrieval.EmbeddingGeneratorType))
+        {
+            if (!throwOnError) { return false; }
+
+            throw new ConfigurationException("Retrieval embedding generation (Retrieval.EmbeddingGeneratorType) is not configured in Kernel Memory.");
+        }
+
+        return true;
+    }
+
+
     private T GetServiceInstance<T>(IKernelMemoryBuilder builder, Action<IServiceCollection> addCustomService)
     {
         // Clone the list of service descriptors, skipping T descriptor
@@ -136,27 +182,8 @@ internal sealed class ServiceConfiguration
                ?? throw new ConfigurationException($"Unable to build {nameof(T)}");
     }
 
-    /// <summary>
-    /// Read a dependency configuration from IConfiguration
-    /// Data is usually retrieved from KernelMemory:Services:{serviceName}, e.g. when using appsettings.json
-    /// {
-    ///   "KernelMemory": {
-    ///     "Services": {
-    ///       "{serviceName}": {
-    ///         ...
-    ///         ...
-    ///       }
-    ///     }
-    ///   }
-    /// }
-    /// </summary>
-    /// <param name="serviceName">Name of the dependency</param>
-    /// <typeparam name="T">Type of configuration to return</typeparam>
-    /// <returns>Configuration instance, settings for the dependency specified</returns>
     private T GetServiceConfig<T>(string serviceName)
     {
         return this._memoryConfiguration.GetServiceConfig<T>(this._rawAppSettings, serviceName);
     }
 }
-
-

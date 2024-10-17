@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.KernelMemory;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddOptions(builder.Configuration);
 
 builder.AddSemanticMemoryServices();
 

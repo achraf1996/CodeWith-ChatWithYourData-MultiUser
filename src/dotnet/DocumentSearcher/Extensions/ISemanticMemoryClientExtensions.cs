@@ -1,16 +1,10 @@
-
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
-
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Microsoft.KernelMemory;
+using Microsoft.Extensions.Options;
+using DocumentSearcher.Options;
+
 using DocumentSearcher.Models;
 
 namespace DocumentSearcher.Extensions;
